@@ -531,10 +531,6 @@ def page_dashboard():
                 GROUP BY d.dept_name ORDER BY COUNT(*) DESC LIMIT 20
             """, [type_filter])
             group_label = "Department"
-            if not df_loc_chart.empty:
-                st.caption(
-                    f"ℹ️ Location not tracked for **{sel_type_dash}** — showing by Department instead."
-                )
 
         chart_title = (sel_type_dash if type_filter else "All Assets") + f" — by {group_label}"
 
