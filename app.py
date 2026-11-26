@@ -478,66 +478,66 @@ def page_dashboard():
 
     st.divider()
 
-    # ── Asset Type Distribution | Top Locations ───────────────────────────────
+    # ── Assets by Type → Location bar chart ──────────────────────────────────
     try:
         import plotly.express as px
         HAS_PLOTLY = True
     except ImportError:
         HAS_PLOTLY = False
 
-    col_t, col_l = st.columns(2)
+    st.subheader("Assets by Location")
+    try:
+        _all_types = db_query(
+            "SELECT type_name FROM asset_types ORDER BY type_name"
+        )["type_name"].tolist()
+        sel_type_dash = st.selectbox(
+            "Select Asset Type", ["All Types"] + _all_types, key="dash_type_loc"
+        )
 
-    with col_t:
-        st.subheader("Assets by Type")
-        try:
-            df_types = db_query("""
-                SELECT t.type_name AS "Asset Type", COUNT(*) AS "Count"
-                FROM assets a
-                JOIN asset_types t ON a.type_id = t.type_id
-                GROUP BY t.type_name ORDER BY COUNT(*) DESC
-            """)
-            if not df_types.empty and HAS_PLOTLY:
-                fig_t = px.pie(df_types, names="Asset Type", values="Count",
-                               hole=0.42,
-                               color_discrete_sequence=[GOLD, NAVY, "#5b7bbf", "#e0a84b",
-                                                        "#8faadc", "#c0860a", "#aaa", "#ccc"])
-                fig_t.update_layout(margin=dict(t=10, b=10, l=10, r=10),
-                                    paper_bgcolor="#fff",
-                                    legend=dict(orientation="v", x=1, y=0.5))
-                fig_t.update_traces(textposition="inside", textinfo="percent+label")
-                st.plotly_chart(fig_t, use_container_width=True)
-            else:
-                st.dataframe(df_types, use_container_width=True, hide_index=True)
-        except Exception as e:
-            st.error(str(e))
-
-    with col_l:
-        st.subheader("Top 10 Locations by Assets")
-        try:
-            df_locs = db_query("""
+        if sel_type_dash == "All Types":
+            df_loc_chart = db_query("""
                 SELECT l.location_name AS "Location", COUNT(*) AS "Assets"
                 FROM allocations al
                 JOIN locations l ON al.location_id = l.location_id
                 WHERE al.is_current = TRUE
                 GROUP BY l.location_name ORDER BY COUNT(*) DESC
-                LIMIT 10
+                LIMIT 20
             """)
-            if not df_locs.empty and HAS_PLOTLY:
-                fig_l = px.bar(df_locs, x="Assets", y="Location",
-                               orientation="h",
-                               color_discrete_sequence=[GOLD],
-                               text="Assets")
-                fig_l.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff",
-                                    margin=dict(t=10, b=10, l=10, r=10),
-                                    yaxis=dict(autorange="reversed"),
-                                    xaxis_title="No. of Assets",
-                                    showlegend=False)
-                fig_l.update_traces(textposition="outside")
-                st.plotly_chart(fig_l, use_container_width=True)
-            else:
-                st.dataframe(df_locs, use_container_width=True, hide_index=True)
-        except Exception as e:
-            st.error(str(e))
+        else:
+            df_loc_chart = db_query("""
+                SELECT l.location_name AS "Location", COUNT(*) AS "Assets"
+                FROM allocations al
+                JOIN locations l ON al.location_id = l.location_id
+                JOIN assets a ON al.asset_id = a.asset_id
+                JOIN asset_types t ON a.type_id = t.type_id
+                WHERE al.is_current = TRUE
+                  AND LOWER(t.type_name) = LOWER(%s)
+                GROUP BY l.location_name ORDER BY COUNT(*) DESC
+                LIMIT 20
+            """, [sel_type_dash])
+
+        if not df_loc_chart.empty and HAS_PLOTLY:
+            fig_loc = px.bar(
+                df_loc_chart, x="Location", y="Assets",
+                color_discrete_sequence=[GOLD],
+                text="Assets",
+                title=f"{'All Assets' if sel_type_dash == 'All Types' else sel_type_dash} — Distribution by Location",
+            )
+            fig_loc.update_layout(
+                plot_bgcolor="#fff", paper_bgcolor="#fff",
+                margin=dict(t=40, b=10, l=10, r=10),
+                xaxis_tickangle=-35,
+                yaxis_title="No. of Assets",
+                showlegend=False,
+            )
+            fig_loc.update_traces(textposition="outside")
+            st.plotly_chart(fig_loc, use_container_width=True)
+        elif not df_loc_chart.empty:
+            st.dataframe(df_loc_chart, use_container_width=True, hide_index=True)
+        else:
+            st.info("No allocation data found for this asset type.")
+    except Exception as e:
+        st.error(str(e))
 
     st.divider()
 
