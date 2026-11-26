@@ -494,9 +494,12 @@ def page_dashboard():
             "Select Asset Type", ["All Types"] + _all_types, key="dash_type_loc"
         )
 
-        if sel_type_dash == "All Types":
+        type_filter = "" if sel_type_dash == "All Types" else sel_type_dash
+
+        # Try location-based grouping first
+        if not type_filter:
             df_loc_chart = db_query("""
-                SELECT l.location_name AS "Location", COUNT(*) AS "Assets"
+                SELECT l.location_name AS "Group", COUNT(*) AS "Assets"
                 FROM allocations al
                 JOIN locations l ON al.location_id = l.location_id
                 WHERE al.is_current = TRUE
@@ -505,7 +508,7 @@ def page_dashboard():
             """)
         else:
             df_loc_chart = db_query("""
-                SELECT l.location_name AS "Location", COUNT(*) AS "Assets"
+                SELECT l.location_name AS "Group", COUNT(*) AS "Assets"
                 FROM allocations al
                 JOIN locations l ON al.location_id = l.location_id
                 JOIN assets a ON al.asset_id = a.asset_id
@@ -514,19 +517,42 @@ def page_dashboard():
                   AND LOWER(t.type_name) = LOWER(%s)
                 GROUP BY l.location_name ORDER BY COUNT(*) DESC
                 LIMIT 20
-            """, [sel_type_dash])
+            """, [type_filter])
+
+        # Fall back to department grouping if no location data for this type
+        group_label = "Location"
+        if df_loc_chart.empty and type_filter:
+            df_loc_chart = db_query("""
+                SELECT d.dept_name AS "Group", COUNT(*) AS "Assets"
+                FROM allocations al
+                JOIN departments d ON al.dept_id = d.dept_id
+                JOIN assets a ON al.asset_id = a.asset_id
+                JOIN asset_types t ON a.type_id = t.type_id
+                WHERE al.is_current = TRUE
+                  AND LOWER(t.type_name) = LOWER(%s)
+                GROUP BY d.dept_name ORDER BY COUNT(*) DESC
+                LIMIT 20
+            """, [type_filter])
+            group_label = "Department"
+            if not df_loc_chart.empty:
+                st.caption(f"ℹ️ Location not tracked for {sel_type_dash} — showing by Department instead.")
 
         if not df_loc_chart.empty and HAS_PLOTLY:
+            chart_title = (
+                f"{'All Assets' if not type_filter else sel_type_dash}"
+                f" — Distribution by {group_label}"
+            )
             fig_loc = px.bar(
-                df_loc_chart, x="Location", y="Assets",
+                df_loc_chart, x="Group", y="Assets",
                 color_discrete_sequence=[GOLD],
                 text="Assets",
-                title=f"{'All Assets' if sel_type_dash == 'All Types' else sel_type_dash} — Distribution by Location",
+                title=chart_title,
             )
             fig_loc.update_layout(
                 plot_bgcolor="#fff", paper_bgcolor="#fff",
                 margin=dict(t=40, b=10, l=10, r=10),
                 xaxis_tickangle=-35,
+                xaxis_title=group_label,
                 yaxis_title="No. of Assets",
                 showlegend=False,
             )
