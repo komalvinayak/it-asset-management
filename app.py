@@ -626,7 +626,8 @@ def page_assets():
     with fc1:
         sel_type = st.selectbox("Asset Type", ["All Types"] + types_df["type_name"].tolist())
     with fc2:
-        sel_dept = st.selectbox("Department", ["All Departments"] + depts_df["dept_name"].tolist())
+        sel_dept = st.selectbox("Department",
+                                ["All Departments", "— Unallocated —"] + depts_df["dept_name"].tolist())
     with fc3:
         search = st.text_input("Search by Serial Number or Model",
                                placeholder="e.g.  SN12345  or  OptiPlex 7050")
@@ -654,7 +655,9 @@ def page_assets():
     if sel_type != "All Types":
         sql += " AND t.type_name = %s"
         params.append(sel_type)
-    if sel_dept != "All Departments":
+    if sel_dept == "— Unallocated —":
+        sql += " AND al.asset_id IS NULL"
+    elif sel_dept != "All Departments":
         sql += " AND d.dept_name = %s"
         params.append(sel_dept)
     if search.strip():
