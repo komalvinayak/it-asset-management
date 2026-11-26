@@ -541,62 +541,6 @@ def page_dashboard():
 
     st.divider()
 
-    # ── Quick Asset Finder ────────────────────────────────────────────────────
-    st.subheader("Quick Asset Finder")
-    st.caption("Filter by asset type and location to see exactly where assets are installed")
-    try:
-        _types  = db_query("SELECT type_name FROM asset_types ORDER BY type_name")["type_name"].tolist()
-        _locs   = db_query("SELECT location_name FROM locations ORDER BY location_name")["location_name"].tolist()
-
-        qf1, qf2, qf3 = st.columns([2, 2, 3])
-        with qf1:
-            q_type = st.selectbox("Asset Type", ["All Types"] + _types, key="dash_q_type")
-        with qf2:
-            q_loc  = st.selectbox("Location",   ["All Locations"] + _locs, key="dash_q_loc")
-        with qf3:
-            q_search = st.text_input("Search by Serial No. / Model / Brand",
-                                     placeholder="e.g. HP EliteBook or SN12345",
-                                     key="dash_q_search")
-
-        qsql = """
-            SELECT a.asset_id        AS "ID",
-                   t.type_name       AS "Type",
-                   COALESCE(m.make_name,'—')  AS "Brand",
-                   COALESCE(a.model_name,'—') AS "Model",
-                   COALESCE(a.serial_no,'—')  AS "Serial No.",
-                   a.purpose         AS "Purpose",
-                   COALESCE(d.dept_name,'Unallocated')     AS "Department",
-                   COALESCE(l.location_name,'—')           AS "Location"
-            FROM assets a
-            LEFT JOIN asset_types  t  ON a.type_id  = t.type_id
-            LEFT JOIN makes        m  ON a.make_id  = m.make_id
-            LEFT JOIN allocations al  ON a.asset_id = al.asset_id AND al.is_current = TRUE
-            LEFT JOIN departments  d  ON al.dept_id = d.dept_id
-            LEFT JOIN locations    l  ON al.location_id = l.location_id
-            WHERE 1=1
-        """
-        qparams = []
-        if q_type != "All Types":
-            qsql += " AND LOWER(t.type_name) = LOWER(%s)"; qparams.append(q_type)
-        if q_loc != "All Locations":
-            qsql += " AND LOWER(l.location_name) = LOWER(%s)"; qparams.append(q_loc)
-        if q_search.strip():
-            qsql += " AND (LOWER(a.serial_no) LIKE LOWER(%s) OR LOWER(a.model_name) LIKE LOWER(%s) OR LOWER(m.make_name) LIKE LOWER(%s))"
-            like = f"%{q_search.strip()}%"
-            qparams += [like, like, like]
-        qsql += " ORDER BY t.type_name, d.dept_name, a.asset_id LIMIT 200"
-
-        df_qf = db_query(qsql, qparams if qparams else None)
-        if df_qf.empty:
-            st.info("No assets match the selected filters.")
-        else:
-            st.caption(f"Showing {len(df_qf)} asset(s)")
-            st.dataframe(df_qf, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.error(str(e))
-
-    st.divider()
-
     # ── Assets by Brand | Recent Procurement ─────────────────────────────────
     col3, col4 = st.columns(2)
 
