@@ -478,12 +478,126 @@ def page_dashboard():
 
     st.divider()
 
-    # ── Procurement Trend | Top Departments ───────────────────────────────────
+    # ── Asset Type Distribution | Top Locations ───────────────────────────────
     try:
         import plotly.express as px
         HAS_PLOTLY = True
     except ImportError:
         HAS_PLOTLY = False
+
+    col_t, col_l = st.columns(2)
+
+    with col_t:
+        st.subheader("Assets by Type")
+        try:
+            df_types = db_query("""
+                SELECT t.type_name AS "Asset Type", COUNT(*) AS "Count"
+                FROM assets a
+                JOIN asset_types t ON a.type_id = t.type_id
+                GROUP BY t.type_name ORDER BY COUNT(*) DESC
+            """)
+            if not df_types.empty and HAS_PLOTLY:
+                fig_t = px.pie(df_types, names="Asset Type", values="Count",
+                               hole=0.42,
+                               color_discrete_sequence=[GOLD, NAVY, "#5b7bbf", "#e0a84b",
+                                                        "#8faadc", "#c0860a", "#aaa", "#ccc"])
+                fig_t.update_layout(margin=dict(t=10, b=10, l=10, r=10),
+                                    paper_bgcolor="#fff",
+                                    legend=dict(orientation="v", x=1, y=0.5))
+                fig_t.update_traces(textposition="inside", textinfo="percent+label")
+                st.plotly_chart(fig_t, use_container_width=True)
+            else:
+                st.dataframe(df_types, use_container_width=True, hide_index=True)
+        except Exception as e:
+            st.error(str(e))
+
+    with col_l:
+        st.subheader("Top 10 Locations by Assets")
+        try:
+            df_locs = db_query("""
+                SELECT l.location_name AS "Location", COUNT(*) AS "Assets"
+                FROM allocations al
+                JOIN locations l ON al.location_id = l.location_id
+                WHERE al.is_current = TRUE
+                GROUP BY l.location_name ORDER BY COUNT(*) DESC
+                LIMIT 10
+            """)
+            if not df_locs.empty and HAS_PLOTLY:
+                fig_l = px.bar(df_locs, x="Assets", y="Location",
+                               orientation="h",
+                               color_discrete_sequence=[GOLD],
+                               text="Assets")
+                fig_l.update_layout(plot_bgcolor="#fff", paper_bgcolor="#fff",
+                                    margin=dict(t=10, b=10, l=10, r=10),
+                                    yaxis=dict(autorange="reversed"),
+                                    xaxis_title="No. of Assets",
+                                    showlegend=False)
+                fig_l.update_traces(textposition="outside")
+                st.plotly_chart(fig_l, use_container_width=True)
+            else:
+                st.dataframe(df_locs, use_container_width=True, hide_index=True)
+        except Exception as e:
+            st.error(str(e))
+
+    st.divider()
+
+    # ── Quick Asset Finder ────────────────────────────────────────────────────
+    st.subheader("Quick Asset Finder")
+    st.caption("Filter by asset type and location to see exactly where assets are installed")
+    try:
+        _types  = db_query("SELECT type_name FROM asset_types ORDER BY type_name")["type_name"].tolist()
+        _locs   = db_query("SELECT location_name FROM locations ORDER BY location_name")["location_name"].tolist()
+
+        qf1, qf2, qf3 = st.columns([2, 2, 3])
+        with qf1:
+            q_type = st.selectbox("Asset Type", ["All Types"] + _types, key="dash_q_type")
+        with qf2:
+            q_loc  = st.selectbox("Location",   ["All Locations"] + _locs, key="dash_q_loc")
+        with qf3:
+            q_search = st.text_input("Search by Serial No. / Model / Brand",
+                                     placeholder="e.g. HP EliteBook or SN12345",
+                                     key="dash_q_search")
+
+        qsql = """
+            SELECT a.asset_id        AS "ID",
+                   t.type_name       AS "Type",
+                   COALESCE(m.make_name,'—')  AS "Brand",
+                   COALESCE(a.model_name,'—') AS "Model",
+                   COALESCE(a.serial_no,'—')  AS "Serial No.",
+                   a.purpose         AS "Purpose",
+                   COALESCE(d.dept_name,'Unallocated')     AS "Department",
+                   COALESCE(l.location_name,'—')           AS "Location"
+            FROM assets a
+            LEFT JOIN asset_types  t  ON a.type_id  = t.type_id
+            LEFT JOIN makes        m  ON a.make_id  = m.make_id
+            LEFT JOIN allocations al  ON a.asset_id = al.asset_id AND al.is_current = TRUE
+            LEFT JOIN departments  d  ON al.dept_id = d.dept_id
+            LEFT JOIN locations    l  ON al.location_id = l.location_id
+            WHERE 1=1
+        """
+        qparams = []
+        if q_type != "All Types":
+            qsql += " AND LOWER(t.type_name) = LOWER(%s)"; qparams.append(q_type)
+        if q_loc != "All Locations":
+            qsql += " AND LOWER(l.location_name) = LOWER(%s)"; qparams.append(q_loc)
+        if q_search.strip():
+            qsql += " AND (LOWER(a.serial_no) LIKE LOWER(%s) OR LOWER(a.model_name) LIKE LOWER(%s) OR LOWER(m.make_name) LIKE LOWER(%s))"
+            like = f"%{q_search.strip()}%"
+            qparams += [like, like, like]
+        qsql += " ORDER BY t.type_name, d.dept_name, a.asset_id LIMIT 200"
+
+        df_qf = db_query(qsql, qparams if qparams else None)
+        if df_qf.empty:
+            st.info("No assets match the selected filters.")
+        else:
+            st.caption(f"Showing {len(df_qf)} asset(s)")
+            st.dataframe(df_qf, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.error(str(e))
+
+    st.divider()
+
+    # ── Procurement Trend | Top Departments ───────────────────────────────────
 
     col1, col2 = st.columns(2)
 
