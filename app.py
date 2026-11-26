@@ -490,65 +490,14 @@ def page_dashboard():
         _all_types = db_query(
             "SELECT type_name FROM asset_types ORDER BY type_name"
         )["type_name"].tolist()
-        _all_depts = db_query(
-            "SELECT dept_name FROM departments ORDER BY dept_name"
-        )["dept_name"].tolist()
 
-        fc1, fc2 = st.columns(2)
-        with fc1:
-            sel_type_dash = st.selectbox(
-                "Select Asset Type", ["All Types"] + _all_types, key="dash_type_loc"
-            )
-        with fc2:
-            sel_dept_dash = st.selectbox(
-                "Select Department", ["All Departments"] + _all_depts, key="dash_dept_loc"
-            )
-
+        sel_type_dash = st.selectbox(
+            "Select Asset Type", ["All Types"] + _all_types, key="dash_type_loc"
+        )
         type_filter = "" if sel_type_dash == "All Types" else sel_type_dash
-        dept_filter = "" if sel_dept_dash == "All Departments" else sel_dept_dash
 
-        # Build WHERE clause extras
-        def _extra_joins_where(type_f, dept_f):
-            joins, where = "", ""
-            if type_f:
-                joins += " JOIN asset_types t ON a.type_id = t.type_id"
-                where += " AND LOWER(t.type_name) = LOWER(%(type)s)"
-            if dept_f:
-                where += " AND LOWER(d.dept_name) = LOWER(%(dept)s)"
-            return joins, where
-
-        p = {"type": type_filter, "dept": dept_filter}
-
-        # Try location-based grouping first
-        loc_sql = """
-            SELECT l.location_name AS "Group", COUNT(*) AS "Assets"
-            FROM allocations al
-            JOIN assets a ON al.asset_id = a.asset_id
-            JOIN departments d ON al.dept_id = d.dept_id
-            JOIN locations l ON al.location_id = l.location_id
-            WHERE al.is_current = TRUE
-        """
+        # Try location-based grouping
         if type_filter:
-            loc_sql += " AND LOWER(a.type_id::text) IN (SELECT type_id::text FROM asset_types WHERE LOWER(type_name)=LOWER(%(type)s))"
-        if dept_filter:
-            loc_sql += " AND LOWER(d.dept_name) = LOWER(%(dept)s)"
-        loc_sql += " GROUP BY l.location_name ORDER BY COUNT(*) DESC LIMIT 20"
-
-        # Simpler approach with explicit JOIN on asset_types
-        if type_filter and dept_filter:
-            df_loc_chart = db_query("""
-                SELECT l.location_name AS "Group", COUNT(*) AS "Assets"
-                FROM allocations al
-                JOIN assets a ON al.asset_id = a.asset_id
-                JOIN asset_types t ON a.type_id = t.type_id
-                JOIN departments d ON al.dept_id = d.dept_id
-                JOIN locations l ON al.location_id = l.location_id
-                WHERE al.is_current = TRUE
-                  AND LOWER(t.type_name) = LOWER(%(type)s)
-                  AND LOWER(d.dept_name)  = LOWER(%(dept)s)
-                GROUP BY l.location_name ORDER BY COUNT(*) DESC LIMIT 20
-            """, p)
-        elif type_filter:
             df_loc_chart = db_query("""
                 SELECT l.location_name AS "Group", COUNT(*) AS "Assets"
                 FROM allocations al
@@ -556,19 +505,9 @@ def page_dashboard():
                 JOIN asset_types t ON a.type_id = t.type_id
                 JOIN locations l ON al.location_id = l.location_id
                 WHERE al.is_current = TRUE
-                  AND LOWER(t.type_name) = LOWER(%(type)s)
+                  AND LOWER(t.type_name) = LOWER(%s)
                 GROUP BY l.location_name ORDER BY COUNT(*) DESC LIMIT 20
-            """, p)
-        elif dept_filter:
-            df_loc_chart = db_query("""
-                SELECT l.location_name AS "Group", COUNT(*) AS "Assets"
-                FROM allocations al
-                JOIN departments d ON al.dept_id = d.dept_id
-                JOIN locations l ON al.location_id = l.location_id
-                WHERE al.is_current = TRUE
-                  AND LOWER(d.dept_name) = LOWER(%(dept)s)
-                GROUP BY l.location_name ORDER BY COUNT(*) DESC LIMIT 20
-            """, p)
+            """, [type_filter])
         else:
             df_loc_chart = db_query("""
                 SELECT l.location_name AS "Group", COUNT(*) AS "Assets"
@@ -578,33 +517,26 @@ def page_dashboard():
                 GROUP BY l.location_name ORDER BY COUNT(*) DESC LIMIT 20
             """)
 
-        # Fall back to department grouping if no location data for selected type
+        # Fall back to department grouping if no location data for this type
         group_label = "Location"
-        if df_loc_chart.empty and (type_filter or dept_filter):
-            fb_sql_parts = ["""
+        if df_loc_chart.empty and type_filter:
+            df_loc_chart = db_query("""
                 SELECT d.dept_name AS "Group", COUNT(*) AS "Assets"
                 FROM allocations al
                 JOIN assets a ON al.asset_id = a.asset_id
+                JOIN asset_types t ON a.type_id = t.type_id
                 JOIN departments d ON al.dept_id = d.dept_id
-            """]
-            if type_filter:
-                fb_sql_parts.append("JOIN asset_types t ON a.type_id = t.type_id")
-            fb_sql_parts.append("WHERE al.is_current = TRUE")
-            if type_filter:
-                fb_sql_parts.append("AND LOWER(t.type_name) = LOWER(%(type)s)")
-            if dept_filter:
-                fb_sql_parts.append("AND LOWER(d.dept_name) = LOWER(%(dept)s)")
-            fb_sql_parts.append("GROUP BY d.dept_name ORDER BY COUNT(*) DESC LIMIT 20")
-            df_loc_chart = db_query(" ".join(fb_sql_parts), p)
+                WHERE al.is_current = TRUE
+                  AND LOWER(t.type_name) = LOWER(%s)
+                GROUP BY d.dept_name ORDER BY COUNT(*) DESC LIMIT 20
+            """, [type_filter])
             group_label = "Department"
-            if not df_loc_chart.empty and type_filter:
-                st.caption(f"ℹ️ Location not tracked for {sel_type_dash} — showing by Department.")
+            if not df_loc_chart.empty:
+                st.caption(
+                    f"ℹ️ Location not tracked for **{sel_type_dash}** — showing by Department instead."
+                )
 
-        # Build chart title
-        parts = []
-        if type_filter: parts.append(sel_type_dash)
-        if dept_filter: parts.append(sel_dept_dash)
-        chart_title = (", ".join(parts) if parts else "All Assets") + f" — by {group_label}"
+        chart_title = (sel_type_dash if type_filter else "All Assets") + f" — by {group_label}"
 
         if not df_loc_chart.empty and HAS_PLOTLY:
             fig_loc = px.bar(
@@ -626,7 +558,7 @@ def page_dashboard():
         elif not df_loc_chart.empty:
             st.dataframe(df_loc_chart, use_container_width=True, hide_index=True)
         else:
-            st.info("No allocation data found for the selected filters.")
+            st.info("No allocation data found for this asset type.")
     except Exception as e:
         st.error(str(e))
 
